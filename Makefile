@@ -1,12 +1,12 @@
-all : pcap_test
+all : tcp_block
 
-pcap_test: main.o
-	g++ -g -o pcap_test main.o -lpcap
+tcp_block: tcp_block.o
+	g++ -g -o tcp_block tcp_block.o -lpcap
 
-main.o:
-	g++ -g -c -o main.o main.cpp
+tcp_block.o:
+	g++ -g -c -o tcp_block.o tcp_block.cpp
 
 clean:
-	rm -f pcap_test
+	rm -f tcp_block
 	rm -f *.o
 
