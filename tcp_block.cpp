@@ -90,12 +90,12 @@ bool Data_checking(u_char * packet, uint32_t start, uint32_t end){
 			int cmp_len = strlen(save_string);
 
 			if(strncmp((const char *)save_string, host_name, max(host_name_len, cmp_len)) == 0){
-				printf("[Success] Correct HostName\n\n");
+				printf("[Success] Correct HostName\n");
 				return false;
 			}
 			else printf("[Work] Different HostName\n\n");
 		}
-		else printf("[Work] No HostName..\n\n");
+		else printf("[Work] No HostName..\n");
 	}
 	return true;
 }
@@ -116,46 +116,67 @@ uint16_t CheckSum(uint16_t * buffer, uint32_t size){
     }
     if(size) checksum += *(uint16_t *)buffer;
 
-    checksum = (checksum >> 16) + (checksum & 0xffff);
+    checksum  = (checksum >> 16) + (checksum & 0xffff);
     checksum += (checksum >> 16);
     return (uint16_t)(~checksum);
 }
 
-void Forward_RST(uint8_t * packet, uint32_t packet_size, uint32_t ipv4_header_end, uint32_t tcp_header_end, pcap_t * handle){
+void Forward_RST(uint8_t * packet, uint32_t packet_size, uint32_t ipv4_header_end, uint32_t tcp_header_end, uint16_t tcp_pseudo_checksum_result, pcap_t * handle){
 	
-	uint32_t new_SEQ_NUM = *(packet + TCP_SEQ_NUM + ipv4_header_end) + (packet_size - tcp_header_end);
+	uint32_t new_SEQ_NUM = ntohl(*(uint32_t *)(packet + TCP_SEQ_NUM + ipv4_header_end)) + (packet_size - tcp_header_end);
 	new_SEQ_NUM = htonl(new_SEQ_NUM);
-	for(int i = 0; i < 4; i++){
-		*(packet + TCP_SEQ_NUM + ipv4_header_end + 3 - i) = new_SEQ_NUM % 256;
-		new_SEQ_NUM /= 256;
-	}
+	*(uint32_t *)(packet + TCP_SEQ_NUM + ipv4_header_end) = new_SEQ_NUM;
 
 	uint8_t save_tcp_flag = *(packet + TCP_Flag + ipv4_header_end);
-	save_tcp_flag = htonl(save_tcp_flag);
 	save_tcp_flag |= 0b00000100;
 	*(packet + TCP_Flag + ipv4_header_end) = save_tcp_flag;	
 
-	*(uint16_t *)(packet + IPv4_checksum + ETHERNET_header_end) = CheckSum((uint16_t *)(packet + ETHERNET_header_end), ipv4_header_end - ETHERNET_header_end);
-
-	tcp_pseudo_checksum tcp_pseudo_check;
-	
-	// must be implemented
-
-	tcp_pseudo_check.protocol_id = 0x6;
+	*(uint16_t *)(packet + IPv4_checksum + ETHERNET_header_end) = 0x0000;
+	uint16_t ipv4_checksum_result = CheckSum((uint16_t *)(packet + ETHERNET_header_end), ipv4_header_end - ETHERNET_header_end);
+	*(uint16_t *)(packet + IPv4_checksum + ETHERNET_header_end) = ipv4_checksum_result;
 
 	*(uint16_t *)(packet + TCP_checksum + ipv4_header_end) = 0x0000;
-	*(uint16_t *)(packet + TCP_checksum + ipv4_header_end) = CheckSum((uint16_t *)(packet + tcp_header_end), sizeof(tcp_pseudo_checksum));
-	
-	if(pcap_sendpacket(handle, packet, packet_size) != 0) printf("[Error] Failed to send Block Packet..\n");
-}
+	uint16_t tcp_checksum = CheckSum((uint16_t *)(packet + ipv4_header_end), packet_size - ipv4_header_end);
+	uint32_t tcp_checksum_tmp = tcp_checksum + tcp_pseudo_checksum_result;
+	tcp_checksum_tmp  = (tcp_checksum_tmp >> 16) + (tcp_checksum_tmp & 0xffff);
+	tcp_checksum_tmp += (tcp_checksum_tmp >> 16);
+	uint16_t tcp_checksum_result = (uint16_t)tcp_checksum_tmp;
+	*(uint16_t *)(packet + TCP_checksum + ipv4_header_end) = tcp_checksum_result;
 
+	if(pcap_sendpacket(handle, packet, packet_size) != 0) printf("[Error] Failed to send Block Packet..\n");
+	else printf("[Success] Forward RST packet sended successfully.\n");
+}
 void Forward_FIN(uint8_t * packet, uint32_t packet_size, uint32_t ipv4_header_end, uint32_t tcp_header_end, pcap_t * handle){
 
 	// if(pcap_sendpacket(handle, packet, packet_size) != 0) printf("[Error] Failed to send Block Packet..\n");
 }
-void Backward_RST(uint8_t * packet, uint32_t packet_size, uint32_t ipv4_header_end, uint32_t tcp_header_end, pcap_t * handle){
+void Backward_RST(uint8_t * packet, uint32_t packet_size, uint32_t ipv4_header_end, uint32_t tcp_header_end, uint16_t tcp_pseudo_checksum_result, pcap_t * handle){
+	
+	uint32_t now_TCP_SEQ_NUM = *(uint32_t *)(packet + TCP_SEQ_NUM + ipv4_header_end);
+	*(uint32_t *)(packet + TCP_SEQ_NUM + ipv4_header_end) = *(uint32_t *)(packet + TCP_ACK_NUM + ipv4_header_end);
+	uint32_t new_SEQ_NUM = ntohl(now_TCP_SEQ_NUM) + (packet_size - tcp_header_end);
+	new_SEQ_NUM = htonl(new_SEQ_NUM);
+	*(uint32_t *)(packet + TCP_ACK_NUM + ipv4_header_end) = new_SEQ_NUM;
 
-	// if(pcap_sendpacket(handle, packet, packet_size) != 0) printf("[Error] Failed to send Block Packet..\n");
+	uint8_t save_tcp_flag = *(packet + TCP_Flag + ipv4_header_end);
+	save_tcp_flag |= 0b00000100;
+	*(packet + TCP_Flag + ipv4_header_end) = save_tcp_flag;	
+
+	*(uint16_t *)(packet + IPv4_checksum + ETHERNET_header_end) = 0x0000;
+	uint16_t ipv4_checksum_result = CheckSum((uint16_t *)(packet + ETHERNET_header_end), ipv4_header_end - ETHERNET_header_end);
+	*(uint16_t *)(packet + IPv4_checksum + ETHERNET_header_end) = ipv4_checksum_result;
+
+	*(uint16_t *)(packet + TCP_checksum + ipv4_header_end) = 0x0000;
+	uint16_t tcp_checksum = CheckSum((uint16_t *)(packet + ipv4_header_end), tcp_header_end - ipv4_header_end);
+	uint32_t tcp_checksum_tmp = tcp_checksum + tcp_pseudo_checksum_result;
+	tcp_checksum_tmp  = (tcp_checksum_tmp >> 16) + (tcp_checksum_tmp & 0xffff);
+	tcp_checksum_tmp += (tcp_checksum_tmp >> 16);
+	uint16_t tcp_checksum_result = (uint16_t)tcp_checksum_tmp;
+	*(uint16_t *)(packet + TCP_checksum + ipv4_header_end) = tcp_checksum_result;
+
+	printf("%d\n", tcp_header_end);
+	if(pcap_sendpacket(handle, packet, tcp_header_end) != 0) printf("[Error] Failed to send Block Packet..\n");
+	else printf("[Success] Backward RST packet sended successfully.\n");
 }
 void Backward_FIN(uint8_t * packet, uint32_t packet_size, uint32_t ipv4_header_end, uint32_t tcp_header_end, pcap_t * handle){
 
@@ -180,11 +201,19 @@ void block_packet(uint8_t * packet, uint32_t packet_size, uint32_t ipv4_header_e
 
 	u_char * forward_packet = new uint8_t[packet_size];
 	for(int i = 0; i < packet_size; i++) forward_packet[i] = packet[i];
-	u_char * backward_packet = new uint8_t[packet_size];
-	for(int i = 0; i < packet_size; i++) backward_packet[i] = packet[i];
+	u_char * backward_packet = new uint8_t[tcp_header_end];
+	for(int i = 0; i < tcp_header_end; i++) backward_packet[i] = packet[i];
+
+	tcp_pseudo_checksum tcp_pseudo_check; // 12byte
+	copy_4byte(src_ip_addr, tcp_pseudo_check.src_ip_addr);
+	copy_4byte(dst_ip_addr, tcp_pseudo_check.dst_ip_addr);
+	tcp_pseudo_check.reserved = 0x00;
+	tcp_pseudo_check.protocol_id = 0x6;
+	tcp_pseudo_check.tcp_length = htons(packet_size - ipv4_header_end); // tcp header + tcp data size
+	uint16_t tcp_pseudo_checksum_result = CheckSum((uint16_t *)&tcp_pseudo_check, sizeof(tcp_pseudo_checksum));
 	
 	if(Forward_FIN_flag) Forward_FIN(forward_packet, packet_size, ipv4_header_end, tcp_header_end, handle);
-	else Forward_RST(forward_packet, packet_size, ipv4_header_end, tcp_header_end, handle);
+	else Forward_RST(forward_packet, packet_size, ipv4_header_end, tcp_header_end, tcp_pseudo_checksum_result, handle);
 
 	copy_6byte(dst_mac_addr, backward_packet + ETHERNET_SOURCE_MAC_ADDR);
 	copy_6byte(src_mac_addr, backward_packet + ETHERNET_DESTINATION_MAC_ADDR);
@@ -193,7 +222,10 @@ void block_packet(uint8_t * packet, uint32_t packet_size, uint32_t ipv4_header_e
 	copy_4byte(dst_port_num, backward_packet + TCP_SOURCE_PORT_NUM);
 	copy_4byte(src_port_num, backward_packet + TCP_DESTINATION_PORT_NUM);
 	if(Backward_FIN_flag) Backward_FIN(backward_packet, packet_size, ipv4_header_end, tcp_header_end, handle);
-	else Backward_RST(backward_packet, packet_size, ipv4_header_end, tcp_header_end, handle);
+	else Backward_RST(backward_packet, packet_size, ipv4_header_end, tcp_header_end, tcp_pseudo_checksum_result, handle);
+		// use same tcp_pseudo_check because src & dst's change don't affect to checksum result
+		// if we use additional data in FIN, we must change this value :(
+	printf("\n");
 }
 
 void Data_check(u_char * packet, uint32_t start, uint32_t max_size, uint32_t ipv4_header_end, uint32_t tcp_header_end, pcap_t * handle){

@@ -9,4 +9,3 @@ tcp_block.o:
 clean:
 	rm -f tcp_block
 	rm -f *.o
-
