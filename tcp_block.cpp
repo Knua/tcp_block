@@ -129,9 +129,11 @@ uint16_t CheckSum(uint16_t * buffer, uint32_t size){
 void Forward_RST(pcap_t * handle, uint8_t * packet, uint32_t seq_num, uint32_t ack_num, uint32_t ipv4_header_end, uint32_t tcp_header_end, uint16_t tcp_pseudo_checksum_result){
 
 	*(uint32_t *)(packet + TCP_SEQ_NUM + ipv4_header_end) = seq_num;
-	*(uint32_t *)(packet + TCP_ACK_NUM + ipv4_header_end) = ack_num;
+	*(uint32_t *)(packet + TCP_ACK_NUM + ipv4_header_end) = 0x00000000;
+	// *(uint32_t *)(packet + TCP_ACK_NUM + ipv4_header_end) = ack_num;
+	uint8_t save_tcp_flag = 0b00000100;
+	// uint8_t save_tcp_flag = 0b00010100; // ACK 빼도 작동
 
-	uint8_t save_tcp_flag = 0b00010100; // ACK 빼도 작동
 	*(packet + TCP_Flag + ipv4_header_end) = save_tcp_flag;	
 
 	*(uint16_t *)(packet + IPv4_checksum + ETHERNET_header_end) = 0x0000;
